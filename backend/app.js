@@ -1,8 +1,13 @@
 import express from 'express';
 import db from './database.js';
+import cors from 'cors';
 
 const app = express();
 const PORT = 3000;
+
+app.use(cors({
+  origin:"localhost:8080/"
+}))
 
 app.get('/api/data', async (req, res) => {
   try {
