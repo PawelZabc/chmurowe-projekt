@@ -11,11 +11,18 @@ app.use(cors({
 
 app.get('/api/data', async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM items');
+    const result = await db.query(`
+      SELECT messages.id, messages.content, messages.created_at, users.username
+      FROM messages
+      JOIN users ON messages.user_id = users.id
+      ORDER BY messages.created_at DESC
+      LIMIT 20;
+    `);
+
     res.json(result.rows);
   } catch (err) {
-    console.error('Querry error:', err);
-    res.status(500).json({ error: err.message });
+    console.error('Error fetching messages:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
