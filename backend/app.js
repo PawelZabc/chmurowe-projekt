@@ -15,7 +15,7 @@ app.get('/api/data', async (req, res) => {
       SELECT messages.id, messages.content, messages.created_at, users.username
       FROM messages
       JOIN users ON messages.user_id = users.id
-      ORDER BY messages.created_at DESC
+      ORDER BY messages.id DESC
       LIMIT 20;
     `);
 
