@@ -4,32 +4,10 @@
   <title>Main</title>
 </head>
 <body>
-  <h1>Strona</h1>
-  <p>text</p>
+  <h1>Main page</h1>
   <a href="/login/">login</a>
   <a href="/signup/">signup</a>
-  <ul id="messages">
-  </ul>
-
-  <script>
-    async function loadMessages() {
-      try {
-        const response = await fetch('http://localhost:3000/api/data');
-        const messages = await response.json();
-        console.log(messages)
-
-        const list = document.getElementById('messages');
-        list.innerHTML = '';
-
-        messages.forEach(msg => {
-          const li = document.createElement('li');
-          li.textContent = `[${msg.username}] ${msg.content}`;
-          list.appendChild(li);
-        });
-      } catch (err) {
-        console.error(err);
-      }
-    }
+  <a href="/message/">messages</a>
 
 
     window.onload = loadMessages;
