@@ -1,26 +1,26 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login</title>
+  <title>Signup</title>
 </head>
 <body>
-  <h1>Log in</h1>
+  <h1>Sign up</h1>
   <input id="username"></input>
   <input type="password" id="password"></input>
-  <button onclick="Login()">Log in</button>
+  <button onclick="createAccount()">Sign up</button>
   <pre id="output"></pre>
   <a href="/">main</a>
-  <a href="/signup/">signup</a>
+  <a href="/login/">login</a>
   
 
 
   <script>
 
     
-    function Login(){
+    function createAccount(){
         const password = document.getElementById("password").value;
         const username = document.getElementById("username").value;
-        fetch('http://localhost:3000/api/login', {
+        fetch('http://localhost:3000/api/signup', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -41,4 +41,3 @@
   </script>
 </body>
 </html>
-
