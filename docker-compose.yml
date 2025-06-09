@@ -5,6 +5,18 @@ services:
       - "8080:80"
     networks:
       - app-net
+    profiles:
+      - prod
+  frontend-dev:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    networks:
+      - app-net
+    volumes:
+      - ./frontend/static:/usr/share/nginx/html/
+    profiles:
+      - dev
 
   backend:
     build:
