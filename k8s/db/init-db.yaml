@@ -8,6 +8,9 @@ spec:
       containers:
         - name: init-db
           image: postgres:16
+          env:
+          - name: PGPASSWORD
+            value: "postgres"
           command: ["psql"]
           args: [
             "-h", "postgres-service",
