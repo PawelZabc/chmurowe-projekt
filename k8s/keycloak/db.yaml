@@ -1,0 +1,22 @@
+# k8s/db/keycloak-pg-db.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-keycloak-db
+spec:
+  template:
+    spec:
+      containers:
+        - name: init-pg
+          image: postgres:14-alpine
+          env:
+            - name: PGPASSWORD
+              value: "postgres"
+          command: ["psql"]
+          args:
+            [
+              "-h", "postgres-service",
+              "-U", "postgres",
+              "-c", "CREATE DATABASE keycloak;"
+            ]
+      restartPolicy: OnFailure
