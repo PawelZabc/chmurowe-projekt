@@ -20,7 +20,6 @@
   <a href="/login/">login</a>
   
 
-
   <script>
 
     async function getMessages(){
@@ -50,17 +49,17 @@
     
     async function sendMessage(){
         const content = document.getElementById("content").value;
-        const user_id = sessionStorage.getItem("id")
-        if (!user_id) {
-            document.getElementById('output').textContent = "Error: User not logged in.";
-            return;
-        }
+        // const user_id = sessionStorage.getItem("id")
+        // if (!user_id) {
+        //     document.getElementById('output').textContent = "Error: User not logged in.";
+        //     return;
+        // }
         await fetch('http://localhost:3000/api/message/', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ content, user_id })
+            body: JSON.stringify({ content })
         })
         .then(async res => {
             const data = await res.json();

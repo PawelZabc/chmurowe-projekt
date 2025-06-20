@@ -1,0 +1,817 @@
+
+=== backend/app.js ===
+import express from 'express';
+import db from './database.js';
+import cors from 'cors';
+
+const app = express();
+const PORT = 3000;
+
+// app.use(cors({
+//   origin: "*"
+// }))
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/api/data', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT messages.id, messages.content, messages.created_at, users.username
+      FROM messages
+      JOIN users ON messages.user_id = users.id
+      ORDER BY messages.id DESC
+      LIMIT 20;
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching messages:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ message: 'You need to enter a username and a password' });
+  }
+  const result = await db.query(
+    'SELECT id, username FROM users WHERE username = $1 AND password = $2',
+    [username, password]
+  );
+  if (result.rows.length === 0) {
+    return res.status(401).json({ message: 'Invalid credentials' });
+  }
+  return res.json({ id: result.rows[0].id, username: result.rows[0].username ,message: "Logged in"});
+});
+
+app.post('/api/signup', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ message: 'You need to enter a username and a password' });
+  }
+  const result = await db.query(
+    'SELECT username FROM users WHERE username = $1',
+    [username]
+  );
+  if (result.rows.length > 0) {
+    return res.status(400).json({ message: 'Account with that username exists' });
+  }
+  else {
+    const result = await db.query(
+          'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username',
+          [username, password]
+        );
+    return res.json({ id: result.rows[0].id, username: result.rows[0].username ,message:"Account created"});
+    }
+  });
+
+  
+// app.post('/api/message', async (req, res) => {
+//   const { userId, content } = req.body;
+
+//   if (!userId || !content) {
+//     return res.status(400).json({ error: 'Missing userId or content' });
+//   }
+
+//   try {
+//     const result = await db.query(
+//       'INSERT INTO messages (user_id, content) VALUES ($1, $2) RETURNING id, content, created_at',
+//       [userId, content]
+//     );
+
+//     res.status(201).json(result.rows[0]);
+//   } catch (err) {
+//     console.error('Error adding message:', err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+app.get('/api/message/', async (req,res)=>{
+  const {userFilter,contentFilter} = req.query;
+  let baseQuery = 'SELECT messages.content, messages.created_at, users.username FROM messages JOIN users ON messages.user_id = users.id';
+  const conditions = [];
+  const params = [];
+
+
+  if (userFilter) {
+    params.push(userFilter);
+    conditions.push(`username = $${params.length}`);
+  }
+
+  if (contentFilter) {
+    params.push(`%${contentFilter}%`);
+    conditions.push(`content ILIKE $${params.length}`);
+  }
+
+  if (conditions.length > 0) {
+    baseQuery += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  baseQuery += ' ORDER BY created_at DESC LIMIT 20';
+
+  const result = await db.query(baseQuery, params);
+
+  res.json(result.rows);
+
+});
+
+app.post('/api/message/', async (req,res)=>{
+  const { user_id, content} = req.body;
+  console.log(user_id,content)
+  if (!user_id) {
+    return res.status(401).json({ message: 'You need to be logged in' });
+  }
+  if (!content){
+    return res.status(400).json({ message: 'The message cant be empty' });
+  }
+  const result = await db.query(
+          'INSERT INTO messages (user_id, content) VALUES ($1, $2) RETURNING id',
+          [user_id, content]
+        );
+  res.status(200).json({message:"Message added"});
+
+});
+
+app.listen(PORT, () => {
+  console.log(`Server started at port ${PORT}`);
+});
+
+=== backend/database.js ===
+import pkg from 'pg';
+const { Pool } = pkg;
+
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres',
+  database: process.env.DB_NAME || 'mydb',
+  port: 5432,
+});
+
+export default {
+  query: (text, params) => pool.query(text, params),
+};
+
+=== docker-compose.yml ===
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    networks:
+      - app-net
+    profiles:
+      - prod
+  frontend-dev:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    networks:
+      - app-net
+    volumes:
+      - ./frontend/static:/usr/share/nginx/html/:ro
+    profiles:
+      - dev
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        NODE_ENV: ${NODE_ENV:-production}
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=mydb
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      - db
+    networks:
+      - app-net
+
+  db:
+    image: postgres:14-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mydb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - app-net
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    command: start-dev
+    environment:
+      KC_DB: dev-mem
+      KC_HTTP_PORT: 8080
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+
+volumes:
+  db-data:
+
+networks:
+  app-net:
+
+=== backend/Dockerfile ===
+FROM node:18-alpine AS builder
+
+ARG NODE_ENV=production
+ENV NODE_ENV=$NODE_ENV
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN if [ "$NODE_ENV" = "development" ]; then \
+      npm install; \
+    else \
+      npm install --omit=dev; \
+    fi
+
+FROM node:18-alpine
+
+ARG NODE_ENV=production
+ENV NODE_ENV=$NODE_ENV
+
+WORKDIR /app
+
+COPY --from=builder /app/node_modules ./node_modules
+
+COPY . .
+
+EXPOSE 3000
+CMD [ "sh", "-c", "if [ \"$NODE_ENV\" = \"development\" ]; then npm run dev; else node app.js; fi" ]
+
+=== frontend/Dockerfile ===
+FROM nginx:alpine
+COPY static/ /usr/share/nginx/html
+
+=== init-db/init.sql ===
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(32) UNIQUE NOT NULL,
+    password VARCHAR(32) NOT NULL
+);
+
+INSERT INTO users(username,password) VALUES 
+('pawel', 'asd'),
+('asd', 'asd');
+
+CREATE TABLE messages (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    content VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO messages (user_id, content) VALUES
+(1, 'Is it working?'),
+(2, 'Yup'),
+(1, 'Yaay');
+=== k8s/backend/deployment.yaml ===
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: backend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DB_HOST
+              value: "postgres-service"
+            - name: DB_USER
+              value: "postgres"
+            - name: DB_PASSWORD
+              value: "postgres"
+            - name: DB_NAME
+              value: "mydb"
+
+=== k8s/backend/service.yaml ===
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 80
+      targetPort: 3000
+  type: ClusterIP
+
+=== k8s/db/configmap.yaml ===
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-sql-config
+data:
+  init.sql: |
+    -- zawartość Twojego init.sql
+    CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(32) UNIQUE NOT NULL,
+    password VARCHAR(32) NOT NULL
+    );
+
+    INSERT INTO users(username,password) VALUES 
+    ('pawel', 'asd'),
+    ('asd', 'asd');
+
+    CREATE TABLE messages (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        content VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO messages (user_id, content) VALUES
+    (1, 'Is it working?'),
+    (2, 'Yup'),
+    (1, 'Yaay');
+
+=== k8s/db/deployment.yaml ===
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:14-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "mydb"
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+
+
+=== k8s/db/init-db.yaml ===
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-db
+spec:
+  template:
+    spec:
+      containers:
+        - name: init-db
+          image: postgres:16
+          env:
+          - name: PGPASSWORD
+            value: "postgres"
+          command: ["psql"]
+          args: [
+            "-h", "postgres-service",
+            "-U", "postgres",
+            "-d", "mydb",
+            "-f", "/docker-entrypoint-initdb.d/init.sql"
+          ]
+          volumeMounts:
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+      restartPolicy: OnFailure
+      volumes:
+        - name: init-script
+          configMap:
+            name: init-sql-config
+
+=== k8s/db/pvc.yaml ===
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: hostpath
+
+=== k8s/db/service.yaml ===
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+spec:
+  selector:
+    app: postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP
+
+
+=== k8s/frontend/deployment.yaml ===
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: frontend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 80
+
+
+=== k8s/frontend/service.yaml ===
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+=== k8s/ingress/ingress.yaml ===
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend-ingress
+  # annotations:
+  #   nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: localhost
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak-service
+                port:
+                  number: 8080
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+
+=== k8s/keycloak/db.yaml ===
+# k8s/db/keycloak-pg-db.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-keycloak-db
+spec:
+  template:
+    spec:
+      containers:
+        - name: init-pg
+          image: postgres:14-alpine
+          env:
+            - name: PGPASSWORD
+              value: "postgres"
+          command: ["psql"]
+          args:
+            [
+              "-h", "postgres-service",
+              "-U", "postgres",
+              "-c", "CREATE DATABASE keycloak;"
+            ]
+      restartPolicy: OnFailure
+
+=== k8s/keycloak/deployment.yaml ===
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:24.0.1
+        args:
+          - start
+          - --spi-login-protocol-openid-connect-iframe-session-check-disabled=true
+        env:
+          - name: KC_DB
+            value: postgres
+          - name: KC_DB_URL
+            value: jdbc:postgresql://postgres-service:5432/keycloak
+          - name: KC_DB_USERNAME
+            value: postgres
+          - name: KC_DB_PASSWORD
+            value: postgres
+          - name: KC_HTTP_ENABLED
+            value: "true"
+          - name: KC_PROXY_HEADERS
+            value: forwarded
+          - name: KC_HTTP_RELATIVE_PATH
+            value: /auth
+          - name: KC_PROXY
+            value: edge
+          - name: KC_HOSTNAME
+            value: localhost
+          - name: KC_HOSTNAME_STRICT
+            value: "false"
+          - name: KEYCLOAK_ADMIN
+            value: admin
+          - name: KEYCLOAK_ADMIN_PASSWORD
+            value: admin
+
+
+        ports:
+        - containerPort: 8080
+
+=== k8s/keycloak/service.yaml ===
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-service
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+=== frontend/Dockerfile ===
+FROM nginx:alpine
+COPY static/ /usr/share/nginx/html
+
+=== frontend/static/auth,js ===
+// auth.js
+(function() {
+  var keycloak = new Keycloak({
+    url: 'http://localhost/auth',  // z Twojego ingress: /auth -> keycloak-service
+    realm: 'master',               // Twój realm jest 'master' (z deployment.yaml keycloak)
+    clientId: 'frontend-client'     // Tu musisz stworzyć klienta o nazwie 'frontend-client' w Keycloak (nie ma go w YAML-ach, więc musisz dodać)
+  });
+
+  keycloak.init({ onLoad: 'login-required', pkceMethod: 'S256' }).then(function(authenticated) {
+    if (authenticated) {
+      console.log('User is authenticated');
+      window.keycloak = keycloak;
+    } else {
+      console.log('User is not authenticated, redirecting to login');
+      keycloak.login();
+    }
+  }).catch(function() {
+    console.error('Failed to initialize Keycloak');
+  });
+})();
+
+=== frontend/static/index.html ===
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Main</title>
+</head>
+<body>
+  <h1>Main page</h1>
+  <a href="/login/">login</a>
+  <a href="/signup/">signup</a>
+  <a href="/message/">messages</a>
+  <script src="/auth.js"></script>
+
+</body>
+</html>
+
+=== frontend/static/login/index.html ===
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login</title>
+</head>
+<body>
+  <h1>Log in</h1>
+  <input id="username"></input>
+  <input type="password" id="password"></input>
+  <button onclick="Login()">Log in</button>
+  <pre id="output"></pre>
+  <a href="/">main</a>
+  <a href="/signup/">signup</a>
+  <a href="/message/">messages</a>
+  
+
+
+  <script>
+
+    
+    function Login(){
+        const password = document.getElementById("password").value;
+        const username = document.getElementById("username").value;
+        fetch('/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password })
+        })
+        .then(async res => {
+            const data = await res.json();
+            if (data.message) {
+                document.getElementById('output').textContent = data.message;
+            }
+            if (data.username && data.id) {
+                sessionStorage.setItem('username', data.username);
+                sessionStorage.setItem('id', data.id);
+            }
+            });
+    }
+  </script>
+</body>
+</html>
+
+
+=== frontend/static/message/index.html ===
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Messages</title>
+</head>
+<body>
+  <h1>Create a message:</h1>
+  <input type="text" id="content"></input>
+  <button onclick="sendMessage()">Send messages</button>
+  <pre id="output"></pre>
+  <h1>Messages</h1>
+  <input id="userFilter"></input>
+  <input id="contentFilter"></input>
+  <button onclick="getMessages()">Get messages</button>
+  <ul id="messages">
+  </ul>
+
+  <a href="/">main</a>
+  <a href="/signup/">signup</a>
+  <a href="/login/">login</a>
+  
+
+
+  <script>
+
+    async function getMessages(){
+        const userFilter = document.getElementById("userFilter").value;
+        const contentFilter = document.getElementById("contentFilter").value;
+
+
+        const params = {};
+        if (userFilter) params.userFilter = userFilter;
+        if (contentFilter) params.contentFilter = contentFilter;
+
+        const queryParams = new URLSearchParams(params).toString();
+        console.log(`http://localhost:3000/api/message?${queryParams}`)
+        const response = await fetch(`/api/message?${queryParams}`);
+        const messages = await response.json();
+
+        const list = document.getElementById('messages');
+        list.innerHTML = '';
+
+        messages.forEach(msg => {
+          const li = document.createElement('li');
+          li.textContent = `[${msg.username}] ${msg.content}`;
+          list.appendChild(li);
+        });
+    }
+
+    
+    async function sendMessage(){
+        const content = document.getElementById("content").value;
+        const user_id = sessionStorage.getItem("id")
+        if (!user_id) {
+            document.getElementById('output').textContent = "Error: User not logged in.";
+            return;
+        }
+        await fetch('/api/message/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content, user_id })
+        })
+        .then(async res => {
+            const data = await res.json();
+            if (data.message) {
+                document.getElementById('output').textContent = data.message;
+            }
+            });
+    }
+  </script>
+</body>
+</html>
+
+
+=== frontend/static/signup/index.html ===
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Signup</title>
+</head>
+<body>
+  <h1>Sign up</h1>
+  <input id="username"></input>
+  <input type="password" id="password"></input>
+  <button onclick="createAccount()">Sign up</button>
+  <pre id="output"></pre>
+  <a href="/">main</a>
+  <a href="/login/">login</a>
+  <a href="/message/">messages</a>
+  
+
+
+  <script>
+
+    
+    function createAccount(){
+        const password = document.getElementById("password").value;
+        const username = document.getElementById("username").value;
+        fetch('http://localhost:3000/api/signup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password })
+        })
+        .then(async res => {
+            const data = await res.json();
+            if (data.message) {
+                document.getElementById('output').textContent = data.message;
+            }
+            if (data.username && data.id) {
+                sessionStorage.setItem('username', data.username);
+                sessionStorage.setItem('id', data.id);
+            }
+            });
+    }
+  </script>
+</body>
+</html>
